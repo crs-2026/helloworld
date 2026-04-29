@@ -1,0 +1,60 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Get Code') {
+            steps {
+                git branch: 'Master', url: 'https://github.com/crs-2026/helloworld.git'
+            }
+        }
+        stage ('Build') {
+            steps {
+                 echo 'Fyyyy, esto es Pyton, no hay que compliar nada'
+            echo WORKSPACE
+            sh 'ls'
+          }
+        }    
+       
+       stage('Tests')
+       {
+         parallel {   
+        
+                stage ('Unit') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh '''
+                            export PYTHONPATH=$WORKSPACE
+                            pytest --junitxml=result-unit.xml test/unit
+                        '''
+                        }
+                    }
+                }
+                stage ('Rest') {
+                    steps {
+                        sh '''
+                       
+                        python3 -m venv .venv
+                        . .venv/bin/activate
+                       
+                        export FLASK_APP=app/api.py
+                        export PYTHONPATH=$WORKSPACE
+                        
+                        flask run &
+                        java -jar /home/crs/Descargas/wiremock-standalone-3.13.2.jar --port 9090 --root-dir test/wiremock &
+                         
+                        sleep 5
+                        
+                        pytest --junitxml=result-rest.xml test/rest
+                        '''
+                          }
+                }
+                
+         }
+      }
+        stage ('Results') {
+           steps {
+               junit 'result*.xml'
+             }
+           }
+       }
+}
