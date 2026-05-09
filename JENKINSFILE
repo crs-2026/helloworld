@@ -7,14 +7,7 @@ pipeline {
                 git branch: 'Master', url: 'https://github.com/crs-2026/helloworld.git'
             }
         }
-        stage ('Build') {
-            steps {
-                 echo 'Fyyyy, esto es Pyton, no hay que compliar nada'
-            echo WORKSPACE
-            sh 'ls'
-          }
-        }    
-       
+        
        stage('Tests')
        {
          parallel {   
@@ -91,7 +84,7 @@ stage ('Coverage'){
       stage('Security'){
           steps {
               sh '''
-              
+              export PYTHONPATH=$WORKSPACE
               python3 -m bandit -r . -f custom -o bandit.out --msg-template "{abspath}:{line}: {severity}: {test_id}: {msg}" || true
               '''
              
@@ -103,7 +96,6 @@ stage ('Coverage'){
           }
       }
       
-     
       stage('Performance')
       {
           steps
@@ -122,10 +114,10 @@ stage ('Coverage'){
           }
       }
       
-        stage ('Results') {
-           steps {
-               junit 'result*.xml'
-             }
-           }
-       }
+        post {
+        always {
+            cleanWs()
+        }
+    }
+  }
 }
