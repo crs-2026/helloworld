@@ -113,11 +113,11 @@ stage ('Coverage'){
               perfReport sourceDataFiles: 'flask.jtl'
           }
       }
-    }  
+
         post {
         always {
             cleanWs()
         }
     }
-  }
-}
+ }
+
