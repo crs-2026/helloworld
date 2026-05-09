@@ -40,7 +40,7 @@ pipeline {
                         export PYTHONPATH=$WORKSPACE
                         
                         flask run &
-                        java -jar ./wiremock-standalone-3.13.2.jar --port 9090 --root-dir test/wiremock &
+                        java -jar /home/crs/Descargas/wiremock-standalone-3.13.2.jar --port 9090 --root-dir test/wiremock &
                          
                         sleep 5
                         
