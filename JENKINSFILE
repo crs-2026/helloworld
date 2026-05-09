@@ -25,7 +25,7 @@ pipeline {
                 stage ('Rest') {
                     steps {
                         sh '''
-                       
+                        rm -rf .venv
                         python3 -m venv .venv
                         . .venv/bin/activate
                        
@@ -33,11 +33,14 @@ pipeline {
                         export PYTHONPATH=$WORKSPACE
                         
                         flask run &
+                        FLASK_PID=$!
                         java -jar /home/crs/Descargas/wiremock-standalone-3.13.2.jar --port 9090 --root-dir test/wiremock &
-                         
+                        WIREMOCK_PID=$!
                         sleep 5
                         
                         pytest --junitxml=result-rest.xml test/rest
+                        kill $FLASK_PID
+                        kill $WIREMOCK_PID
                         '''
                           }
             }
