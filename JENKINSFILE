@@ -47,10 +47,81 @@ pipeline {
                         pytest --junitxml=result-rest.xml test/rest
                         '''
                           }
-                }
-                
+            }
          }
       }
+
+stage ('Coverage'){
+          steps{
+                  sh '''
+                  export PYTHONPATH=.
+                  python3 -m coverage run  --branch --source=app --omit=app/__init__.py,app/api.py  -m pytest --junitxml=result-unit.xml test/unit
+                  python3 -m coverage xml
+                  '''
+                  
+                  recordCoverage(
+                    tools: [
+                    [parser: 'COBERTURA', pattern: 'coverage.xml']
+                    ],
+                    qualityGates: [
+                      [criticality: 'ERROR', integerThreshold: 85, metric: 'LINE', threshold: 97.0], 
+                      [integerThreshold: 99, metric: 'LINE', threshold: 95.0], 
+                      [criticality: 'ERROR', integerThreshold:80, metric: 'BRANCH', threshold:80.0], 
+                      [integerThreshold: 90, metric: 'BRANCH', threshold: 90.0]
+                    ]
+              )
+          }
+      }
+      
+      stage ('Static'){
+          steps {
+              sh '''
+              export PYTHONPATH=$WORKSPACE
+              python3 -m flake8 --exit-zero --format=pylint app >flake8.out
+              '''
+              recordIssues tools: [flake8(name: 'flake8', pattern: 'flake8.out')],
+                  qualityGates: [
+                      [threshold: 0, type:'TOTAL', unstable: true], 
+                      [threshold: 11, type: 'TOTAL', unstable: false]
+                ]
+              
+          }
+      }
+      
+      stage('Security'){
+          steps {
+              sh '''
+              
+              python3 -m bandit -r . -f custom -o bandit.out --msg-template "{abspath}:{line}: {severity}: {test_id}: {msg}" || true
+              '''
+             
+            recordIssues tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
+                qualityGates: [
+                [threshold: 1, type:'TOTAL', unstable: true], 
+                [threshold: 2, type: 'TOTAL', unstable: false]
+                ]
+          }
+      }
+      
+     
+      stage('Performance')
+      {
+          steps
+          {
+             sh '''
+              python3 -m venv .venv
+                    . .venv/bin/activate
+                       
+                    export FLASK_APP=app/api.py
+                    export PYTHONPATH=$WORKSPACE
+                        
+                    flask run &
+              /home/crs/apache-jmeter-5.6.3/bin/jmeter.sh -n -t test/jmeter/flask.jmx -f -l flask.jtl
+              '''
+              perfReport sourceDataFiles: 'flask.jtl'
+          }
+      }
+      
         stage ('Results') {
            steps {
                junit 'result*.xml'
