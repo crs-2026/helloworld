@@ -111,7 +111,9 @@ stage ('Coverage'){
                     export PYTHONPATH=$WORKSPACE
                         
                     flask run &
+                    FLASK_PID=$!
               /home/crs/apache-jmeter-5.6.3/bin/jmeter.sh -n -t test/jmeter/flask.jmx -f -l flask.jtl
+              kill $FLASK_PID
               '''
               perfReport sourceDataFiles: 'flask.jtl'
           }
