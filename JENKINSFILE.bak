@@ -2,15 +2,11 @@ pipeline {
     agent any
 
     stages {
-        stage('Get Code') {
-            steps {
-                git branch: 'Master', url: 'https://github.com/crs-2026/helloworld.git'
-            }
-        }
-        
-       stage('Tests')
-       {
-         parallel {   
+                stage('Get Code') {
+                    steps {
+                        git branch: 'Master', url: 'https://github.com/crs-2026/helloworld.git'
+                    }
+                }
         
                 stage ('Unit') {
                     steps {
@@ -22,6 +18,7 @@ pipeline {
                         }
                     }
                 }
+                
                 stage ('Rest') {
                     steps {
                         sh '''
@@ -44,93 +41,98 @@ pipeline {
                         '''
                           }
             }
-         }
-      }
-
-stage ('Coverage'){
-          steps{
-                  sh '''
-                  export PYTHONPATH=.
-                  python3 -m coverage run  --branch --source=app --omit=app/__init__.py,app/api.py  -m pytest --junitxml=result-unit.xml test/unit
-                  python3 -m coverage xml
-                  '''
-                  
-                  recordCoverage(
-                    tools: [
-                    [parser: 'COBERTURA', pattern: 'coverage.xml']
-                    ],
-                    qualityGates: [
-                      [criticality: 'ERROR', integerThreshold: 85, metric: 'LINE', threshold: 97.0], 
-                      [integerThreshold: 99, metric: 'LINE', threshold: 95.0], 
-                      [criticality: 'ERROR', integerThreshold:80, metric: 'BRANCH', threshold:80.0], 
-                      [integerThreshold: 90, metric: 'BRANCH', threshold: 90.0]
-                    ]
-              )
-          }
-      }
+         
+                stage ('Static'){
+                      steps {
+                          sh '''
+                          export PYTHONPATH=$WORKSPACE
+                          python3 -m flake8 --exit-zero --format=pylint app >flake8.out
+                          '''
+                          recordIssues tools: [flake8(name: 'flake8', pattern: 'flake8.out')],
+                              qualityGates: [
+                                  [threshold: 8, type:'TOTAL', unstable: true], 
+                                  [threshold: 10, type: 'TOTAL', unstable: false]
+                            ]
+                          
+                      }
+                  }
+        
+                  stage('Security Test'){
+                  steps {
+                      sh '''
+                       export PYTHONPATH="${WORKSPACE}"
+                       # 1. Create a virtual environment using Python 3.12
+                       python3.12 -m venv venv
+                
+                       # 2. Activate it
+                       . venv/bin/activate
+                
+                        # 3. Install Bandit inside this specific bubble
+                        pip install --upgrade pip
+                        pip install bandit
+                        python3.12 -m bandit --exit-zero -r ./test -f custom -o bandit.out \
+                            --msg-template "{abspath}:{line}: [{test_id}({severity})] {msg}"
+                            '''
+                            
+                            recordIssues tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
+                                qualityGates: [
+                                    [threshold: 2, type:'TOTAL', unstable: true], 
+                                    [threshold: 4, type: 'TOTAL', unstable: false]
+                                ]
+            }
+        }
+             
+        
+        stage ('Coverage'){
+                  steps{
+                          sh '''
+                          export PYTHONPATH=.
+                          python3 -m coverage run  --branch --source=app --omit=app/__init__.py,app/api.py  -m pytest --junitxml=result-unit.xml test/unit
+                          python3 -m coverage xml
+                          '''
+                          
+                         recordCoverage(
+                            tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']],
+                            // El pipeline continuará aunque las métricas fallen gracias a que recordCoverage
+                            // por defecto no detiene el flujo a menos que se fuerce explícitamente.
+                            qualityGates: [
+                                // --- Cobertura de LÍNEAS ---
+                                // Si es menor a 85.0 -> Rojo (ERROR)
+                                [threshold: 85.0, metric: 'LINE', criticality: 'ERROR'],
+                                // Si es menor a 95.0 -> Amarillo (UNSTABLE)
+                                [threshold: 95.0, metric: 'LINE', criticality: 'UNSTABLE'],
+                
+                                // --- Cobertura de RAMAS (Branches) ---
+                                // Si es menor a 80.0 -> Rojo (ERROR)
+                                [threshold: 80.0, metric: 'BRANCH', criticality: 'ERROR'],
+                                // Si es menor a 90.0 -> Amarillo (UNSTABLE)
+                                [threshold: 90.0, metric: 'BRANCH', criticality: 'UNSTABLE']
+                            ]
+                        )
+                  }
+              }
       
-      stage ('Static'){
-          steps {
-              sh '''
-              export PYTHONPATH=$WORKSPACE
-              python3 -m flake8 --exit-zero --format=pylint app >flake8.out
-              '''
-              recordIssues tools: [flake8(name: 'flake8', pattern: 'flake8.out')],
-                  qualityGates: [
-                      [threshold: 8, type:'TOTAL', unstable: true], 
-                      [threshold: 10, type: 'TOTAL', unstable: false]
-                ]
+              stage('Performance')
+              {
+                  steps
+                  {
+                     sh '''
+                      python3 -m venv .venv
+                            . .venv/bin/activate
+                               
+                            export FLASK_APP=app/api.py
+                            export PYTHONPATH=$WORKSPACE
+                                
+                            flask run &
+                            FLASK_PID=$!
+                      /home/crs/apache-jmeter-5.6.3/bin/jmeter.sh -n -t test/jmeter/flask.jmx -f -l flask.jtl
+                      kill $FLASK_PID
+                      '''
+                      perfReport sourceDataFiles: 'flask.jtl'
+                  }
+              }
               
-          }
-      }
-      
-   stage('Security Test'){
-          steps {
-              sh '''
-               export PYTHONPATH="${WORKSPACE}"
-               # 1. Create a virtual environment using Python 3.12
-               python3.12 -m venv venv
-        
-               # 2. Activate it
-               . venv/bin/activate
-        
-                # 3. Install Bandit inside this specific bubble
-                pip install --upgrade pip
-                pip install bandit
-                python3.12 -m bandit --exit-zero -r ./test -f custom -o bandit.out \
-                    --msg-template "{abspath}:{line}: [{test_id}({severity})] {msg}"
-                    '''
-                    
-                    recordIssues tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
-                        qualityGates: [
-                            [threshold: 2, type:'TOTAL', unstable: true], 
-                            [threshold: 4, type: 'TOTAL', unstable: false]
-                        ]
-    }
-}
-      
-      
-      stage('Performance')
-      {
-          steps
-          {
-             sh '''
-              python3 -m venv .venv
-                    . .venv/bin/activate
-                       
-                    export FLASK_APP=app/api.py
-                    export PYTHONPATH=$WORKSPACE
-                        
-                    flask run &
-                    FLASK_PID=$!
-              /home/crs/apache-jmeter-5.6.3/bin/jmeter.sh -n -t test/jmeter/flask.jmx -f -l flask.jtl
-              kill $FLASK_PID
-              '''
-              perfReport sourceDataFiles: 'flask.jtl'
-          }
-      }
-      
- }
+         }
 post {
         always {
             cleanWs()
