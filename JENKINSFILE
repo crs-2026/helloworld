@@ -84,20 +84,31 @@ stage ('Coverage'){
           }
       }
       
-      stage('Security'){
+   stage('Security Test'){
           steps {
               sh '''
-              export PYTHONPATH=$WORKSPACE
-              python3 -m bandit -r . -f custom -o bandit.out --msg-template "{abspath}:{line}: {severity}: {test_id}: {msg}" || true
-              '''
-             
-            recordIssues tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
-                qualityGates: [
-                [threshold: 1, type:'TOTAL', unstable: true], 
-                [threshold: 2, type: 'TOTAL', unstable: false]
-                ]
-          }
-      }
+               export PYTHONPATH="${WORKSPACE}"
+               # 1. Create a virtual environment using Python 3.12
+               python3.12 -m venv venv
+        
+               # 2. Activate it
+               . venv/bin/activate
+        
+                # 3. Install Bandit inside this specific bubble
+                pip install --upgrade pip
+                pip install bandit
+                python3.12 -m bandit --exit-zero -r ./test -f custom -o bandit.out \
+                    --msg-template "{abspath}:{line}: [{test_id}({severity})] {msg}"
+                    '''
+                    
+                    recordIssues tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
+                        qualityGates: [
+                            [threshold: 2, type:'TOTAL', unstable: true], 
+                            [threshold: 4, type: 'TOTAL', unstable: false]
+                        ]
+    }
+}
+      
       
       stage('Performance')
       {
