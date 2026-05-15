@@ -1,0 +1,359 @@
+pipeline {
+
+    agent none
+
+    stages {
+
+        /*
+         * =====================================================
+         * GET CODE
+         * =====================================================
+         */
+
+        stage('Get Code') {
+
+            agent {label 'Windows'}
+            
+            steps {
+            bat '''
+            whoami
+            hostname
+            echo %WORSPACE%
+            '''
+
+                git branch: 'Master',
+                    url: 'https://github.com/crs-2026/helloworld.git'
+
+                // Guardamos el workspace
+                stash name: 'source-code', includes: 'app/**,test/**,requirements.txt,Jenkinsfile'
+            
+            }
+            
+             post {
+               always {
+                 cleanWs()
+            }
+          }
+        }
+
+        /*
+         * =====================================================
+         * TESTS EN PARALELO
+         * =====================================================
+         */
+
+        stage('Tests') {
+
+            parallel {
+
+                /*
+                 * ======================
+                 * UNIT
+                 * ======================
+                 */
+
+                stage('Unit') {
+
+                  agent {label 'Linux1'}
+
+                    steps {
+                            sh '''
+                            whoami
+                            hostname
+                            echo $WORKSPACE
+                            '''
+                        unstash 'source-code'
+
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') 
+                        {
+                            sh '''
+                            export PYTHONPATH=$WORKSPACE
+
+                            pytest \
+                                --junitxml=result-unit.xml \
+                                test/unit
+                            '''
+                        }
+
+                        junit testResults: 'result-unit.xml'
+                    }
+                    post {
+                      always {
+                        cleanWs()
+                       }
+                    }
+                }
+
+                /*
+                 * ======================
+                 * STATIC
+                 * ======================
+                 */
+
+                stage('Static') {
+
+                   agent {label 'Linux1'}
+
+                    steps {
+                        sh '''
+                            whoami
+                            hostname
+                            echo $WORKSPACE
+                            '''
+
+                        unstash 'source-code'
+
+                        sh '''
+                        export PYTHONPATH=$WORKSPACE
+
+                        python3 -m flake8 \
+                            --exit-zero \
+                            --format=pylint app > flake8.out
+                        '''
+
+                        recordIssues(
+                            tools: [flake8(name: 'flake8', pattern: 'flake8.out')],
+
+                            qualityGates: [
+                                [threshold: 8, type:'TOTAL', unstable: true],
+                                [threshold: 10, type: 'TOTAL', unstable: false]
+                            ]
+                        )
+                    }
+                    
+                    post {
+                      always {
+                        cleanWs()
+                       }
+                    }
+                }
+
+                /*
+                 * ======================
+                 * SECURITY
+                 * ======================
+                 */
+
+                stage('Security Test') {
+
+                  agent {label 'Linux1'}
+
+                    steps {
+                        sh '''
+                            whoami
+                            hostname
+                            echo $WORKSPACE
+                            '''
+
+                        unstash 'source-code'
+
+                        sh '''
+                        export PYTHONPATH="${WORKSPACE}"
+
+                        python3.12 -m venv venv
+
+                        . venv/bin/activate
+
+                        pip install --upgrade pip
+                        pip install bandit
+
+                        bandit \
+                            --exit-zero \
+                            -r ./test \
+                            -f custom \
+                            -o bandit.out \
+                            --msg-template "{abspath}:{line}: [{test_id}({severity})] {msg}"
+                        '''
+
+                        recordIssues(
+                            tools: [pyLint(name: 'Bandit',pattern: 'bandit.out')],
+
+                            qualityGates: [
+                                [threshold: 2, type:'TOTAL', unstable: true],
+                                [threshold: 4, type:'TOTAL', unstable: false]
+                            ]
+                        )
+                    }
+                    post {
+                      always {
+                        cleanWs()
+                       }
+                    }
+                }
+            }
+        }
+
+        /*
+         * =====================================================
+         * REST
+         * =====================================================
+         */
+
+        stage('Rest') {
+
+            agent {label 'Linux2'}
+
+            steps {
+                sh '''
+                            whoami
+                            hostname
+                            echo $WORKSPACE
+                            '''
+
+                unstash 'source-code'
+
+                sh '''
+                rm -rf .venv
+
+                python3 -m venv .venv
+
+                . .venv/bin/activate
+                pip install Flask
+                pip install pytest
+                export FLASK_APP=app/api.py
+                export PYTHONPATH=$WORKSPACE
+
+                flask run &
+                FLASK_PID=$!
+
+                java -jar \
+                    /home/crs/Descargas/wiremock-standalone-3.13.2.jar \
+                    --port 9090 \
+                    --root-dir test/wiremock &
+
+                WIREMOCK_PID=$!
+
+                trap "kill $FLASK_PID $WIREMOCK_PID" EXIT
+
+                sleep 5
+
+                pytest \
+                    --junitxml=result-rest.xml \
+                    test/rest
+                '''
+
+                junit testResults: 'result-rest.xml'
+            }
+            post {
+                      always {
+                        cleanWs()
+                       }
+                    }
+        }
+
+        /*
+         * =====================================================
+         * COVERAGE + PERFORMANCE
+         * =====================================================
+         */
+
+        stage('Coverage & Performance') {
+
+            parallel {
+
+                /*
+                 * ======================
+                 * COVERAGE
+                 * ======================
+                 */
+
+                stage('Coverage') {
+
+                   agent {label 'Linux1'}
+
+                    steps {
+                        sh '''
+                            whoami
+                            hostname
+                            echo $WORKSPACE
+                            '''
+
+                        unstash 'source-code'
+
+                        sh '''
+                        export PYTHONPATH=.
+
+                        python3 -m coverage run \
+                            --branch \
+                            --source=app \
+                            --omit=app/__init__.py,app/api.py \
+                            -m pytest \
+                            --junitxml=result-unit.xml \
+                            test/unit
+
+                        python3 -m coverage xml
+                        '''
+
+                        recordCoverage(
+
+                            tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']],
+
+                            qualityGates: [
+                                [threshold: 85.0, metric: 'LINE',criticality: 'ERROR'],
+                                [threshold: 95.0, metric: 'LINE',criticality: 'UNSTABLE'],
+                                [threshold: 80.0, metric: 'BRANCH',criticality: 'ERROR'],
+                                [threshold: 90.0, metric: 'BRANCH',criticality: 'UNSTABLE']
+                            ]
+                        )
+                    }
+                    post {
+                      always {
+                        cleanWs()
+                       }
+                    }
+                }
+
+                /*
+                 * ======================
+                 * PERFORMANCE
+                 * ======================
+                 */
+
+                stage('Performance') {
+
+                   agent {label 'Linux1'}
+
+                    steps {
+                        sh '''
+                            whoami
+                            hostname
+                            echo $WORKSPACE
+                            '''
+
+                        unstash 'source-code'
+
+                        sh '''
+                        python3 -m venv .venv
+
+                        . .venv/bin/activate
+
+                        export FLASK_APP=app/api.py
+                        export PYTHONPATH=$WORKSPACE
+
+                        flask run &
+                        FLASK_PID=$!
+
+                        trap "kill $FLASK_PID" EXIT
+
+                        sleep 5
+
+                        /home/crs/apache-jmeter-5.6.3/bin/jmeter.sh \
+                            -n \
+                            -t test/jmeter/flask.jmx \
+                            -f \
+                            -l flask.jtl
+                        '''
+                        perfReport sourceDataFiles: 'flask.jtl'
+                    }
+                    post {
+                      always {
+                        cleanWs()
+                       }
+                    }
+                }
+                 
+            }
+            
+        }
+    }
+}
