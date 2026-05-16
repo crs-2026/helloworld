@@ -2,12 +2,24 @@ pipeline {
     agent any
 
     stages {
+                /*
+                 * ======================
+                 * GET CODE
+                 * ======================
+                 */
+
                 stage('Get Code') {
                     steps {
                         git branch: 'Master', url: 'https://github.com/crs-2026/helloworld.git'
                     }
                 }
-        
+
+                /*
+                 * ======================
+                 * UNIT
+                 * ======================
+                 */
+
                 stage ('Unit') {
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
@@ -16,10 +28,16 @@ pipeline {
                             pytest --junitxml=result-unit.xml test/unit
                         '''
                         }
-                        junit testResults: 'result-unit.xml'
+						junit testResults: 'result-unit.xml'
                     }
                 }
-                
+
+                /*
+                 * ======================
+                 * REST
+                 * ======================
+                 */
+
                 stage ('Rest') {
                     steps {
                         sh '''
@@ -40,11 +58,16 @@ pipeline {
                         kill $FLASK_PID
                         kill $WIREMOCK_PID
                         '''
-                        junit testResults: 'result-rest.xml'
+						 junit testResults: 'result-rest.xml'
                           }
-                          
-                  }
-         
+            }
+
+                /*
+                 * ======================
+                 * STATIC
+                 * ======================
+                 */
+
                 stage ('Static'){
                       steps {
                           sh '''
@@ -59,7 +82,14 @@ pipeline {
                           
                       }
                   }
-        
+
+
+                /*
+                 * ======================
+                 * SECURITY
+                 * ======================
+                 */
+
                   stage('Security Test'){
                   steps {
                       sh '''
@@ -85,7 +115,12 @@ pipeline {
             }
         }
              
-        
+                 /*
+                 * ======================
+                 * COVERAGE
+                 * ======================
+                 */
+
         stage ('Coverage'){
                   steps{
                           sh '''
@@ -114,7 +149,14 @@ pipeline {
                         )
                   }
               }
-      
+
+
+            /*
+            * ======================
+            * PERFORMANCE
+            * ======================
+            */
+
               stage('Performance')
               {
                   steps
